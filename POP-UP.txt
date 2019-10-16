@@ -1,0 +1,144 @@
+method IF_EX_WORKORDER_UPDATE~AT_SAVE.
+
+
+ CHECK sy-uname = 'EBU-20' or sy-uname = 'EBU-24'
+ or sy-uname = 'EBU-25' or sy-uname = 'FALK_HILLER'.
+
+
+  DATA: txtLabel(150) type c,
+        txtButtton(20) type c,
+        title(40) type c value '10%-Hürde übeschritten '.
+
+
+
+  DATA: matnr(20) type c,
+        avlblOrder(2) type n value '0',
+        materialTotal(6) type n value '0',
+        materialFreeTotal(6) type n,
+        days(4) type n,
+        answer type c.
+
+
+
+
+  DATA materialRange type standard table of bapi_order_material_range.
+  DATA wa_materialRange like line of materialRange.
+
+  DATA headerInfo type standard table of bapi_order_header1.
+  DATA wa_headerInfo like line of headerInfo.
+
+  DATA orderList type standard table of BAPI_ORDER_HEADER1.
+  DATA wa_orderList like line of orderList.
+
+  DATA operationInfo type standard table of BAPI_ORDER_OPERATION1.
+  DATA wa_operationInfo like line of operationInfo.
+
+  DATA returnInfo type BAPIRET2.
+
+
+  DATA fertigungsmengeSoll type i.
+  DATA erhoehung type i.
+  DATA verhaeltnisWert type i.
+
+
+
+
+  fertigungsmengeSoll  = IS_HEADER_DIALOG-BMENGE.
+
+  auftrgInfo = IS_HEADER_DIALOG-aufnr.
+  auftrgObjekt-header = 'X'.
+  auftrgObjekt-operations = 'X'.
+  auftrgObjekt-components = 'X'.
+
+  CALL FUNCTION 'BAPI_PRODORD_GET_DETAIL'
+
+    EXPORTING
+      NUMBER                 = auftrgInfo
+      ORDER_OBJECTS          = auftrgObjekt
+IMPORTING
+    RETURN                   = returnInfo
+ TABLES
+       HEADER                =  headerInfo
+
+            .
+
+  loop at headerInfo into wa_headerInfo.
+    matnr = wa_headerInfo-Material.
+   materialTotal = wa_headerInfo-TARGET_QUANTITY.
+    verhaeltnisWert = wa_headerInfo-TARGET_QUANTITY * '1.1'.
+  endloop.
+
+
+  wa_materialRange-sign = 'I'.
+  wa_materialRange-option = 'EQ'.
+  wa_materialRange-low = matnr.
+
+  insert wa_materialRange into table materialRange.
+
+
+
+
+  call function 'BAPI_PRODORD_GET_LIST'
+* EXPORTING
+*   COLLECTIVE_ORDER          =
+  importing
+    RETURN                    = returnList
+  TABLES
+
+    material_range            = materialRange
+    order_header              = orderList
+
+         .
+  erhoehung = fertigungsmengeSoll - materialTotal.
+
+  loop at orderList into wa_orderList.
+
+    days = sy-datum - wa_orderList-actual_release_date.
+
+
+    if (  wa_orderList-SYSTEM_STATUS cs 'FREI' and days <= 21 ).
+      add 1 to avlblOrder.
+      add wa_orderList-target_quantity to materialFreeTotal.
+    endif.
+
+  endloop.
+
+ CASE avlblOrder.
+
+   WHEN 0.
+      CONCATENATE '0 freie Aufträge.' 'Es kann keine Auskunft gegeben werden.'
+      into txtLabel SEPARATED BY space.
+
+    WHEN 1.
+      CONCATENATE 'In einem freien Auftrag befindet sich eine Gesamtauftragsmenge in Höhe von' materialFreeTotal
+      'v selben Material.' into txtLabel SEPARATED BY space.
+
+  WHEN OTHERS.
+
+    CONCATENATE 'In' avlblOrder 'freien Aufträgen befindet sich eine Gesamtauftragsmenge in Höhe von ' materialFreeTotal
+    ', des selben Materials.' 'Möchten Sie dennoch erhöhen?' into txtLabel SEPARATED BY space.
+  ENDCASE.
+
+
+  IF avlblOrder >= 1 and fertigungsmengeSoll > verhaeltnisWert.
+
+
+  CALL FUNCTION 'POPUP_TO_CONFIRM'
+    EXPORTING
+      TITLEBAR                     = title
+      TEXT_QUESTION               = txtLabel
+      TEXT_BUTTON_1               = 'Ja'(001)
+      TEXT_BUTTON_2               = 'Nein'(002)
+
+     IMPORTING
+      ANSWER                      = answer
+
+        .
+
+ ENDIF.
+  IF answer = '2'.
+    message 'Die von Ihnen vorgenommene Änderung wurde nicht verbucht.' type 'E' raising error_with_message.
+  ENDIF.
+
+
+ENDMETHOD.
